@@ -109,6 +109,7 @@ protected:
     virtual void updateAuxiliaryText (void) = 0;
     virtual void updatePreeditText (void) = 0;
     virtual void updatePinyin (void) = 0;
+    virtual void updateRestLiteral (void);
 
     guint getCursorLeftByWord (void);
     guint getCursorRightByWord (void);
@@ -116,6 +117,7 @@ protected:
 
     /* varibles */
     guint                       m_pinyin_len;
+    gboolean                    m_rest_literal;
     LookupTable                 m_lookup_table;
     guint                       m_lookup_cursor;
     String                      m_buffer;

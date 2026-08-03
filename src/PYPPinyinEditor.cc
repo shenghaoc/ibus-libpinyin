@@ -34,6 +34,20 @@ PinyinEditor::PinyinEditor (PinyinProperties & props,
 {
 }
 
+gboolean
+PinyinEditor::insertRest (gint ch)
+{
+    if (G_UNLIKELY (m_text.length () >= MAX_PINYIN_LEN))
+        return TRUE;
+
+    m_text.insert (m_cursor++, ch);
+    m_lookup_cursor = 0;
+
+    updatePinyin ();
+    update ();
+    return TRUE;
+}
+
 
 /**
  * process pinyin
@@ -75,6 +89,13 @@ PinyinEditor::processNumber (guint keyval, guint keycode,
         break;
     default:
         g_return_val_if_reached (FALSE);
+    }
+
+    if (m_rest_literal && modifiers == 0) {
+        gchar ch = (keyval >= IBUS_KP_0 && keyval <= IBUS_KP_9)
+            ? (gchar) ('0' + (keyval - IBUS_KP_0))
+            : (gchar) keyval;
+        return insertRest (ch);
     }
 
     if (modifiers == 0)
@@ -120,10 +141,6 @@ PinyinEditor::processPunct (guint keyval, guint keycode,
             pageDown ();
             return TRUE;
         }
-        /* keep the period in the full pinyin text as the un-parsed text,
-         * so that it is committed after the pinyins, not before them. */
-        if (!m_config.doublePinyin () && !m_config.autoCommit ())
-            return insert (keyval);
         break;
     case IBUS_equal:
         if (m_config.minusEqualPage ()) {
@@ -147,6 +164,11 @@ PinyinEditor::processPunct (guint keyval, guint keycode,
         return FALSE;
     }
 
+    /* keep the period as the un-parsed text, so that it is committed
+     * after the pinyins, not before them. */
+    if (IBUS_period == keyval)
+        return insertRest (keyval);
+
     return FALSE;
 }
 
@@ -169,11 +191,15 @@ PinyinEditor::processFunctionKey (guint keyval, guint keycode,
         case IBUS_Shift_L:
             if (!m_config.shiftSelectCandidate ())
                 return FALSE;
+            if (m_rest_literal)
+                return FALSE;
             selectCandidateInPage (1);
             return TRUE;
 
         case IBUS_Shift_R:
             if (!m_config.shiftSelectCandidate ())
+                return FALSE;
+            if (m_rest_literal)
                 return FALSE;
             selectCandidateInPage (2);
             return TRUE;
@@ -218,25 +244,52 @@ PinyinEditor::processKeyEvent (guint keyval, guint keycode,
     }
 }
 
-/**
- * append the un-parsed text after the pinyins,
- * where the periods are the Chinese periods.
- */
 void
-PinyinEditor::appendRestText (String & buffer, gboolean full_letter)
+PinyinEditor::updateRestLiteral (void)
 {
     const gchar *p = m_text.c_str () + m_pinyin_len;
 
-    for (; *p != '\0'; p++) {
-        if ('.' == *p && m_props.modeFullPunct ()) {
-            buffer << "。";
-            continue;
-        }
+    /* strip the apostrophes, which are delimiters rather than rest text. */
+    String rest;
+    for (; *p != 0; p++) {
+        if (*p != '\'')
+            rest << *p;
+    }
 
-        if (G_UNLIKELY (full_letter))
-            buffer.appendUnichar (HalfFullConverter::toFull (*p));
-        else
-            buffer << *p;
+    if (rest.empty ()) {
+        m_rest_literal = FALSE;
+        return;
+    }
+
+    if (m_rest_literal)
+        return; /* sticky: once literal, only emptying the rest clears it. */
+
+    m_rest_literal = (rest.find ('.') != String::npos && rest != ".");
+}
+
+/**
+ * append the un-parsed text after the pinyins,
+ * where a period which ends the sentence is the Chinese period.
+ */
+void
+PinyinEditor::appendRestText (String & buffer)
+{
+    const gchar *p = m_text.c_str () + m_pinyin_len;
+
+    for (; *p != 0; p++) {
+        if (G_UNLIKELY ('.' == *p)) {
+            if (m_props.modeFullPunct ())
+                buffer << "。";
+            else if (m_props.modeFull ())
+                buffer.appendUnichar (HalfFullConverter::toFull ('.'));
+            else
+                buffer << '.';
+        } else {
+            if (m_props.modeFull ())
+                buffer.appendUnichar (HalfFullConverter::toFull (*p));
+            else
+                buffer << *p;
+        }
     }
 }
 
@@ -252,7 +305,7 @@ PinyinEditor::commit (const gchar *str)
     m_buffer << str;
 
     /* text after pinyin */
-    appendRestText (m_buffer, m_props.modeFull ());
+    appendRestText (m_buffer);
 
     Text text (m_buffer.c_str ());
     commitText (text);
@@ -263,6 +316,24 @@ PinyinEditor::commit (const gchar *str)
 void
 PinyinEditor::updatePreeditText ()
 {
+    if (G_UNLIKELY (m_text.empty ())) {
+        hidePreeditText ();
+        return;
+    }
+
+    if (m_rest_literal) {
+        /* in literal mode show the raw text, not the guessed sentence. */
+        m_buffer.clear ();
+        m_buffer << m_text;
+
+        StaticText preedit_text (m_buffer);
+        preedit_text.appendAttribute (IBUS_ATTR_TYPE_UNDERLINE,
+                                      IBUS_ATTR_UNDERLINE_SINGLE, 0, -1);
+
+        Editor::updatePreeditText (preedit_text, m_cursor, TRUE);
+        return;
+    }
+
     if (DISPLAY_STYLE_COMPACT == m_config.displayStyle () ||
         DISPLAY_STYLE_COMPATIBILITY == m_config.displayStyle ())
         return;
@@ -271,7 +342,7 @@ PinyinEditor::updatePreeditText ()
     pinyin_get_n_candidate (m_instance, &num);
 
     /* preedit text = guessed sentence + un-parsed pinyin text */
-    if (G_UNLIKELY (m_text.empty () || 0 == num)) {
+    if (G_UNLIKELY (0 == num)) {
         hidePreeditText ();
         return;
     }
@@ -297,7 +368,7 @@ PinyinEditor::updatePreeditText ()
     }
 
     /* append rest text */
-    appendRestText (m_buffer, FALSE);
+    appendRestText (m_buffer);
 
     StaticText preedit_text (m_buffer);
     /* underline */
@@ -353,6 +424,13 @@ PinyinEditor::updateAuxiliaryText ()
 void
 PinyinEditor::updateLookupTable ()
 {
+    if (m_rest_literal) {
+        m_candidates.clear ();
+        m_lookup_table.clear ();
+        hideLookupTable ();
+        return;
+    }
+
     m_lookup_table.setPageSize (m_config.pageSize ());
     m_lookup_table.setOrientation (m_config.orientation ());
     PhoneticEditor::updateLookupTable ();

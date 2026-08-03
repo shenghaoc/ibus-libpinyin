@@ -137,6 +137,11 @@ DoublePinyinEditor::updateAuxiliaryText (void)
         return;
     }
 
+    if (m_rest_literal) {
+        hideAuxiliaryText ();
+        return;
+    }
+
     m_buffer.clear ();
 
     if (m_config.doublePinyinShowRaw ()) {
@@ -148,8 +153,7 @@ DoublePinyinEditor::updateAuxiliaryText (void)
         g_free(aux_text);
 
         /* append rest text */
-        const gchar * p = m_text.c_str() + m_pinyin_len;
-        m_buffer << p;
+        appendRestText (m_buffer);
     }
 
     StaticText text (m_buffer);

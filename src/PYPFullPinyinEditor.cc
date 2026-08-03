@@ -117,6 +117,11 @@ FullPinyinEditor::updateAuxiliaryText (void)
         return;
     }
 
+    if (m_rest_literal) {
+        hideAuxiliaryText ();
+        return;
+    }
+
     m_buffer.clear ();
 
     gchar * aux_text = NULL;
@@ -125,8 +130,7 @@ FullPinyinEditor::updateAuxiliaryText (void)
     g_free(aux_text);
 
     /* append rest text */
-    const gchar * p = m_text.c_str() + m_pinyin_len;
-    m_buffer << p;
+    appendRestText (m_buffer);
 
     StaticText text (m_buffer);
     if (DISPLAY_STYLE_TRADITIONAL == m_config.displayStyle () ||
@@ -144,7 +148,7 @@ FullPinyinEditor::getLookupCursor (void)
     /* as pinyin_get_pinyin_offset can't handle the last "'" characters,
        strip the string to work around it here. */
     String stripped = m_text;
-    size_t pos = stripped.find_last_not_of ("'") + 1;
+    size_t pos = stripped.find_last_not_of ("'.") + 1;
     if (pos < stripped.length ())
         stripped.erase (pos);
 

@@ -30,6 +30,7 @@ PhoneticEditor::PhoneticEditor (PinyinProperties &props,
                                 Config &config)
     : Editor (props, config),
     m_pinyin_len (0),
+    m_rest_literal (FALSE),
     m_lookup_table (m_config.pageSize ()),
     m_lookup_cursor (0),
     m_libpinyin_candidates (this),
@@ -69,6 +70,14 @@ PhoneticEditor::processSpace (guint keyval, guint keycode,
         return FALSE;
     if (cmshm_filter (modifiers) != 0)
         return TRUE;
+
+    if (m_rest_literal) {
+        /* in literal mode commit the raw text, not the pinyin sentence. */
+        Text text (m_text.c_str ());
+        commitText (text);
+        reset ();
+        return TRUE;
+    }
 
     if (m_lookup_table.size () != 0) {
         selectCandidate (m_lookup_table.cursorPos ());
@@ -336,6 +345,7 @@ void
 PhoneticEditor::reset (void)
 {
     m_pinyin_len = 0;
+    m_rest_literal = FALSE;
     m_lookup_table.clear ();
 
     pinyin_reset (m_instance);
@@ -344,8 +354,16 @@ PhoneticEditor::reset (void)
 }
 
 void
+PhoneticEditor::updateRestLiteral (void)
+{
+    m_rest_literal = FALSE;
+}
+
+void
 PhoneticEditor::update (void)
 {
+    updateRestLiteral ();
+
     guint lookup_cursor = getLookupCursor ();
 
     /* The lookup cursor is not moved here. */
