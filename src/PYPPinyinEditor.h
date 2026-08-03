@@ -39,6 +39,8 @@ protected:
     gboolean processPunct (guint keyval, guint keycode, guint modifiers);
     gboolean processFunctionKey (guint keyval, guint keycode, guint modifiers);
 
+    void appendRestText (String & buffer, gboolean full_letter);
+
     virtual void updateAuxiliaryText (void) = 0;
     virtual void updateLookupTable (void);
     virtual void updatePreeditText (void);

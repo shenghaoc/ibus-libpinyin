@@ -120,6 +120,10 @@ PinyinEditor::processPunct (guint keyval, guint keycode,
             pageDown ();
             return TRUE;
         }
+        /* keep the period in the full pinyin text as the un-parsed text,
+         * so that it is committed after the pinyins, not before them. */
+        if (!m_config.doublePinyin () && !m_config.autoCommit ())
+            return insert (keyval);
         break;
     case IBUS_equal:
         if (m_config.minusEqualPage ()) {
@@ -214,6 +218,28 @@ PinyinEditor::processKeyEvent (guint keyval, guint keycode,
     }
 }
 
+/**
+ * append the un-parsed text after the pinyins,
+ * where the periods are the Chinese periods.
+ */
+void
+PinyinEditor::appendRestText (String & buffer, gboolean full_letter)
+{
+    const gchar *p = m_text.c_str () + m_pinyin_len;
+
+    for (; *p != '\0'; p++) {
+        if ('.' == *p && m_props.modeFullPunct ()) {
+            buffer << "。";
+            continue;
+        }
+
+        if (G_UNLIKELY (full_letter))
+            buffer.appendUnichar (HalfFullConverter::toFull (*p));
+        else
+            buffer << *p;
+    }
+}
+
 void
 PinyinEditor::commit (const gchar *str)
 {
@@ -226,14 +252,7 @@ PinyinEditor::commit (const gchar *str)
     m_buffer << str;
 
     /* text after pinyin */
-    const gchar *p = m_text.c_str() + m_pinyin_len;
-    if (G_UNLIKELY (m_props.modeFull ())) {
-        while (*p != '\0') {
-            m_buffer.appendUnichar (HalfFullConverter::toFull (*p++));
-        }
-    } else {
-        m_buffer << p;
-    }
+    appendRestText (m_buffer, m_props.modeFull ());
 
     Text text (m_buffer.c_str ());
     commitText (text);
@@ -278,8 +297,7 @@ PinyinEditor::updatePreeditText ()
     }
 
     /* append rest text */
-    const gchar *p = m_text.c_str () + m_pinyin_len;
-    m_buffer << p;
+    appendRestText (m_buffer, FALSE);
 
     StaticText preedit_text (m_buffer);
     /* underline */
