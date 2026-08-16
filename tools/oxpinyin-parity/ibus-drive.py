@@ -112,6 +112,16 @@ def main(argv):
     sequence.append((IBus.KEY_1, "select:label-1"))
     sequence += [(ord(ch), "type:" + ch) for ch in "beijing"]
     sequence.append((IBus.KEY_3, "select:label-3"))
+
+    # zh-class incomplete-initial coverage for the pin re-freeze evidence:
+    # zhongguo plus z / c / s single initials.  Escape after each keeps the
+    # composition boundaries identical on both backends.
+    sequence += [(ord(ch), "type:" + ch + ":zh-class") for ch in "zhongguo"]
+    sequence.append((IBus.KEY_Escape, "reset:zhongguo"))
+    for initial in ("z", "c", "s"):
+        sequence.append((ord(initial), "type:" + initial + ":zh-class"))
+        sequence.append((IBus.KEY_Escape, "reset:initial-" + initial))
+
     sequence.append((IBus.KEY_BackSpace, "lifecycle:backspace-empty"))
     sequence.append((IBus.KEY_Left, "lifecycle:left-empty"))
     sequence.append((IBus.KEY_Right, "lifecycle:right-empty"))
