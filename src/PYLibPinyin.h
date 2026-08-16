@@ -25,9 +25,7 @@
 #include <time.h>
 #include <glib.h>
 #include <stdio.h>
-
-typedef struct _pinyin_context_t pinyin_context_t;
-typedef struct _pinyin_instance_t pinyin_instance_t;
+#include <pinyin.h>
 
 namespace PY {
 
@@ -95,6 +93,7 @@ private:
     pinyin_context_t *m_chewing_context;
 
     guint m_timeout_id;
+    guint m_save_timeout;
     GTimer *m_timer;
 
 private:

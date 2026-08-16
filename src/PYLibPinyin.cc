@@ -36,6 +36,7 @@ static LibPinyinBackEnd libpinyin_backend;
 
 LibPinyinBackEnd::LibPinyinBackEnd () {
     m_timeout_id = 0;
+    m_save_timeout = LIBPINYIN_SAVE_TIMEOUT;
     m_timer = g_timer_new ();
     m_pinyin_context = NULL;
     m_chewing_context = NULL;
@@ -218,10 +219,19 @@ LibPinyinBackEnd::modified (void)
     /* Restart the timer */
     g_timer_start (m_timer);
 
+    /* W8 experiment hook: keep the production five-minute save cadence, but
+       allow the headless parity/save harness to shorten the timer. */
+    const gchar *env_timeout = g_getenv ("LIBPINYIN_SAVE_TIMEOUT_SECONDS");
+    if (env_timeout != NULL) {
+        guint64 parsed = g_ascii_strtoull (env_timeout, NULL, 10);
+        if (parsed > 0 && parsed <= 3600)
+            m_save_timeout = (guint) parsed;
+    }
+
     if (m_timeout_id != 0)
         return;
 
-    m_timeout_id = g_timeout_add_seconds (LIBPINYIN_SAVE_TIMEOUT,
+    m_timeout_id = g_timeout_add_seconds (m_save_timeout,
                                           LibPinyinBackEnd::timeoutCallback,
                                           static_cast<gpointer> (this));
 }
@@ -411,7 +421,7 @@ LibPinyinBackEnd::timeoutCallback (gpointer data)
     /* Get the elapsed time since last modification of database. */
     guint elapsed = (guint)g_timer_elapsed (self->m_timer, NULL);
 
-    if (elapsed >= LIBPINYIN_SAVE_TIMEOUT &&
+    if (elapsed >= self->m_save_timeout &&
         self->saveUserDB ()) {
         self->m_timeout_id = 0;
         return FALSE;

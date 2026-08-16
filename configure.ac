@@ -66,13 +66,71 @@ if test -z "$SQLITE3"; then
     AC_MSG_ERROR([could not find sqlite3 tool.])
 fi
 
-PKG_CHECK_MODULES(LIBPINYIN, [
-    libpinyin >= 2.9.92
-], [enable_libpinyin=yes])
+# --with-oxpinyin-capi=PATH is the W8 experiment switch: link the fork
+# against oxpinyin-capi (PATH is the oxpinyin checkout root) instead of the
+# installed C++ libpinyin.  The release cdylib must already be built:
+#   cargo build --release -p oxpinyin-capi
+AC_ARG_WITH([oxpinyin-capi],
+    AS_HELP_STRING([--with-oxpinyin-capi=PATH],
+        [use oxpinyin-capi from the oxpinyin checkout at PATH]),
+    [with_oxpinyin_capi=$withval],
+    [with_oxpinyin_capi=no])
 
-LIBPINYIN_DATADIR=`$PKG_CONFIG --variable=pkgdatadir libpinyin`
+# Directory passed to pinyin_init() as systemdir.  For C++ libpinyin this
+# is pkgdatadir + /data.  For oxpinyin-capi it must contain the migrated
+# pinyin_index.redb / phrase_index.redb / bigram.redb tables.
+AC_ARG_WITH([oxpinyin-capi-datadir],
+    AS_HELP_STRING([--with-oxpinyin-capi-datadir=PATH],
+        [system data directory passed to pinyin_init() when oxpinyin-capi is used]),
+    [with_oxpinyin_capi_datadir=$withval],
+    [with_oxpinyin_capi_datadir=no])
+
+AS_IF([test x"$with_oxpinyin_capi" != x"no"], [
+    AS_IF([test x"$with_oxpinyin_capi" = x"yes"], [
+        AC_MSG_ERROR([--with-oxpinyin-capi requires a path to the oxpinyin checkout])
+    ])
+
+    OXPINYIN_CAPI_DIR=`cd "$with_oxpinyin_capi" 2>/dev/null && pwd`
+    AS_IF([test -z "$OXPINYIN_CAPI_DIR"], [
+        AC_MSG_ERROR([--with-oxpinyin-capi path does not exist: $with_oxpinyin_capi])
+    ])
+
+    OXPINYIN_CAPI_HEADER="$OXPINYIN_CAPI_DIR/crates/oxpinyin-capi/pinyin.h"
+    OXPINYIN_CAPI_LIB="$OXPINYIN_CAPI_DIR/target/release/libpinyin_capi.so"
+    AS_IF([test ! -f "$OXPINYIN_CAPI_HEADER"], [
+        AC_MSG_ERROR([oxpinyin-capi header not found: $OXPINYIN_CAPI_HEADER])
+    ])
+    AS_IF([test ! -f "$OXPINYIN_CAPI_LIB"], [
+        AC_MSG_ERROR([oxpinyin-capi release library not found: $OXPINYIN_CAPI_LIB
+Run "cargo build --release -p oxpinyin-capi" in $OXPINYIN_CAPI_DIR first.])
+    ])
+
+    LIBPINYIN_CFLAGS="-I$OXPINYIN_CAPI_DIR/crates/oxpinyin-capi"
+    LIBPINYIN_LIBS="-L$OXPINYIN_CAPI_DIR/target/release -Wl,-rpath,$OXPINYIN_CAPI_DIR/target/release -lpinyin_capi"
+
+    AS_IF([test x"$with_oxpinyin_capi_datadir" != x"no"], [
+        AS_IF([test ! -d "$with_oxpinyin_capi_datadir"], [
+            AC_MSG_ERROR([--with-oxpinyin-capi-datadir is not a directory: $with_oxpinyin_capi_datadir])
+        ])
+        OXPINYIN_CAPI_DATADIR=`cd "$with_oxpinyin_capi_datadir" 2>/dev/null && pwd`
+    ], [
+        OXPINYIN_CAPI_DATADIR="$OXPINYIN_CAPI_DIR/fixtures/w3"
+    ])
+
+    LIBPINYIN_SYSTEM_DIR="$OXPINYIN_CAPI_DATADIR"
+    enable_libpinyin="oxpinyin-capi ($OXPINYIN_CAPI_DIR)"
+], [
+    PKG_CHECK_MODULES(LIBPINYIN, [
+        libpinyin >= 2.9.92
+    ], [enable_libpinyin=yes])
+
+    LIBPINYIN_DATADIR=`$PKG_CONFIG --variable=pkgdatadir libpinyin`
+    LIBPINYIN_SYSTEM_DIR="$LIBPINYIN_DATADIR/data"
+])
 
 AC_SUBST(LIBPINYIN_DATADIR)
+AC_SUBST(LIBPINYIN_SYSTEM_DIR)
+AC_SUBST(OXPINYIN_CAPI_DIR)
 
 # check if ibus_config_get_values, which is available in ibus-1.3.99+ (git master)
 save_CFLAGS="$CFLAGS"

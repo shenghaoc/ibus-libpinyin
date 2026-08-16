@@ -171,7 +171,7 @@ ibus_engine_libpinyin_LDADD = \
 	$(NULL)
 
 ibus_engine_libpinyin_CXXFLAGS += \
-	-DLIBPINYIN_DATADIR=\"@LIBPINYIN_DATADIR@\/data\" \
+	-DLIBPINYIN_DATADIR=\"@LIBPINYIN_SYSTEM_DIR@\" \
 	$(NULL)
 
 if IBUS_BUILD_LUA_EXTENSION
