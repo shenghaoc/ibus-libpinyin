@@ -1,27 +1,93 @@
 # oxpinyin backend switch — W8 experiment record
 
-Status: **complete through Phase 3**. The fork builds and runs against
-`oxpinyin-capi`, and the same fork binary produces an identical observable
-stream on both backends except one equal-cost candidate tie-swap
-(`避恶`/`保额` for input `be`), which belongs to oxpinyin's documented
-1,030 order-only tie-swap class.
+Status: **revalidated against clean oxpinyin `main` after PR stack #80–#87
+was merged**. The fork builds and runs against `oxpinyin-capi` with zero
+local oxpinyin patches. The extended parity sequence produces the same
+observable stream on both backends except one equal-cost candidate tie-swap
+(`避恶`/`保额` for input `be`): verdict **TIE-ORDER-ONLY**.
 
 ## Source identity
 
 - Fork: `shenghaoc/ibus-libpinyin`, branch `feat/oxpinyin-backend`,
   created from `fix-556-keep-period-in-pinyin-text` @ `5b8ae81`
   (`FORK_BASE_REF` = `fix-556-keep-period-in-pinyin-text`).
-- oxpinyin read-only checkout: `/tmp/oxpinyin`, branch
-  `feat/w8-fork-bootstrap-surface` @ `9290021`
-  (`feat(capi): close W8 fork-bootstrap 51-symbol and C++ header gaps`).
-  The parent directory of the fork is read-only in this workspace, so the
-  sibling clone lives in `/tmp/oxpinyin`.
+- oxpinyin read-only checkout: `/tmp/oxpinyin`, branch `main` @
+  `3ec6172b73e7158c0f9555e48cd71d7dcf00b576`
+  (`refactor: stack-review cleanups that do not change merge-time behavior`);
+  `git -C /tmp/oxpinyin status --porcelain` is empty (clean, no local
+  patches). The parent directory of the fork is read-only in this
+  workspace, so the sibling clone lives in `/tmp/oxpinyin`.
 - C++ oracle: libpinyin `2.11.91` @
   `0c5e80e1200f84fab185d1c5bde458b770a0636c`, built by
   `tools/oracle/build-oracle.sh` into `/tmp/oxpinyin-oracle/prefix`.
 - Model: `model20.text.tar.gz`, SHA-256
   `59c68e89d43ff85f5a309489499cbcde282d2b04bd91888734884b7defcb1155`,
   fetched through `tools/model/fetch-model.sh`.
+
+## Revalidation against merged oxpinyin main (PR stack #80–#87)
+
+Method: same experiment shape as Phase 1–3, but the oxpinyin checkout is
+clean `main` @ `3ec6172b73e7158c0f9555e48cd71d7dcf00b576` with no local
+patches, and `/tmp/oxpinyin-dual-data` was regenerated from a clean-main
+`oxpinyin-migrate export` plus the pinned model `interpolation2.text`.
+
+Main-state checks all pass:
+
+- `pinyin_get_parsed_input_length` is exported in
+  `crates/oxpinyin-capi/pinyin.h` and implemented.
+- `PINYIN_CAPI_ALLOW_FLAT_UNIGRAMS` is gone from the tree.
+- `oxpinyin_init_for_fixtures` exists in `context.rs` but is **not** in
+  `pinyin.h`.
+- `MAX_CANDIDATES` is absent from `crates/oxpinyin-engine/src/session.rs`.
+
+Build/link/symbol result:
+
+- `cargo build --release -p oxpinyin-capi` completes.
+- The fork was rebuilt and reinstalled exactly as Phase 1
+  (`--with-oxpinyin-capi=/tmp/oxpinyin`,
+  `--with-oxpinyin-capi-datadir=/tmp/oxpinyin-dual-data`,
+  `--prefix=/tmp/ibus-libpinyin-dev`, `--disable-libnotify`,
+  `--disable-opencc`, `--disable-lua-extension`); the make log has no
+  compiler warnings/errors.
+- `ldd /tmp/ibus-libpinyin-dev/libexec/ibus-engine-libpinyin` resolves
+  `libpinyin_capi.so` to the rebuilt
+  `/tmp/oxpinyin/target/release/libpinyin_capi.so`; `readelf -d` shows it
+  as `DT_NEEDED` with the `/tmp/oxpinyin/target/release` RPATH.
+- `nm -D --undefined-only` on the engine reports exactly **51**
+  undefined `pinyin_*` symbols; `ldd -r` reports no unresolved
+  `pinyin_*` symbol. The 51 references are the same live call surface as
+  the Phase 0 table below.
+
+Smoke/parity result:
+
+- `tools/oxpinyin-parity/run-smoke.sh` passes: commits are exactly
+  `你好 / 你好 / 北京 / nihao` and the candidate-page sanity assertions hold.
+- `tools/oxpinyin-parity/run-parity.sh` (extended sequence with the
+  `zhongguo` plus `z`/`c`/`s` zh-class inputs) captures 128 events per
+  side. `compare-streams.py` verdict: **TIE-ORDER-ONLY**. The sole lookup
+  difference is the equal-cost `be` swap:
+  oracle `…, 避恶, 保额, …` vs oxpinyin `…, 保额, 避恶, …`.
+
+Interpolation2 / fail-closed `pinyin_init`:
+
+- `/tmp/oxpinyin-dual-data` does supply `interpolation2.text` (symlink to
+  the verified model20 extraction), so the fork's data-path config is
+  correct and public `pinyin_init` succeeds.
+- A direct C probe confirmed the new fail-closed behavior: the same redb
+  tables without `interpolation2.text` make public `pinyin_init` return
+  NULL, while `oxpinyin_init_for_fixtures` is the explicit fixture-only
+  path. This is the intended #84 behavior, not a fork regression.
+
+Save/train cycle:
+
+- With `LIBPINYIN_SAVE_TIMEOUT_SECONDS=5` and the save-cycle GSettings
+  profile using `sort-candidate-option=1` (sentence candidates enabled; the
+  parity profile's option 2 deliberately excludes NBEST/sentence
+  candidates and therefore never reaches `pinyin_train`), selecting `nihao`
+  with Space runs the full NBEST train path. An LD_PRELOAD call trace
+  recorded `pinyin_train -> 1` followed by the timer-driven
+  `pinyin_save -> 1`; `user_store.redb` compacted from **1,056,768 bytes
+  to 32,768 bytes**, proving train -> modified -> timeout -> `pinyin_save`.
 
 ## Phase 0 — call surface and buckets (rerun against feat/w8-fork-bootstrap-surface)
 
@@ -181,8 +247,9 @@ No crashes; candidate pages are sane; commits are exactly
 `你好 / 你好 / 北京 / nihao`. Save/train: oxpinyin commits training durably
 on every `pinyin_train`. The fork save timer was exercised with the W8 test
 hook `LIBPINYIN_SAVE_TIMEOUT_SECONDS=5`; after the timer fired, the redb
-user store compacted from 1,056,768 bytes to 20,480 bytes, proving the
-train -> modified -> timeout -> `pinyin_save` cycle.
+user store compacted from 1,056,768 bytes to 20,480 bytes in the original
+patched run (the clean-main revalidation above observes 32,768 bytes),
+proving the train -> modified -> timeout -> `pinyin_save` cycle.
 
 ## Phase 3 — wire-level parity
 
@@ -221,21 +288,26 @@ oracle run and to `libpinyin_capi.so` in the native run.
 
 ## Phase 4 — record
 
-### oxpinyin-patches/ inventory (local, uncommitted in /tmp/oxpinyin)
+### oxpinyin-patches/ disposition (deleted after merge)
 
-| Patch | Rationale |
+The six experiment `.patch` files were deleted from the fork branch in
+commit `fbd1b97` (`chore: remove oxpinyin-patches superseded by merged
+oxpinyin PR stack`); the files remain recoverable from git history. All six
+changes are merged or superseded on oxpinyin main:
+
+| Patch | Upstream disposition |
 |---|---|
-| `01-capi-decode-pinyin-incomplete-option.patch` | Decode `PINYIN_INCOMPLETE` from `pinyin_set_options` into the session config. |
-| `02-capi-load-interpolation2-real-unigrams.patch` | Load the fetched model's `interpolation2.text` when present so candidate ranking uses the real three-key frequencies. |
-| `03-capi-full-pinyin-auxiliary-text-format.patch` | Port C++ full-pinyin auxiliary text (`space-separated keys + |`). |
-| `04-engine-raise-max-candidates-to-4096.patch` | The C++ candidate table is not capped at 64; raising the session cap lets the wire total match. The real-tables pins remain unchanged. |
-| `05-capi-filter-ng-only-tokens-at-abi-boundary.patch` | C ABI shim: raw `n` must not surface phrases reachable only through zero-initial `ng`. Kept in the capi layer because the equivalent core `completions` fix moved the frozen pins and was reverted under the STOP rule. |
-| `06-bisect-guard-nbest-accessor.patch` | oxpinyin's bisection tool aborted against the oracle by calling `pinyin_get_candidate_nbest_index` on non-NBEST candidates. |
+| `01-capi-decode-pinyin-incomplete-option.patch` | Merged as PR **#83** (`feat/capi-decode-incomplete-option`). |
+| `02-capi-load-interpolation2-real-unigrams.patch` | Merged as PR **#84** (`feat/capi-interpolation2-unigrams`); public `pinyin_init` is now fail-closed and requires `interpolation2.text`. |
+| `03-capi-full-pinyin-auxiliary-text-format.patch` | Merged as PR **#86** (`feat/capi-full-aux-text`). |
+| `04-engine-raise-max-candidates-to-4096.patch` | Merged as PR **#87** (`fix/engine-remove-candidate-cap`); the cap constant is gone from `session.rs`. |
+| `05-capi-filter-ng-only-tokens-at-abi-boundary.patch` | **Superseded** by PR **#85** (`fix/core-incomplete-phonetic-initial`), the core phonetic-initial fix. |
+| `06-bisect-guard-nbest-accessor.patch` | Merged as PR **#82** (`fix/bisect-nbest-guard`). |
 
-All patches keep integer/saturating arithmetic; no float paths were added.
-`cargo test -p oxpinyin-capi --release` passes 13/13. The pinned oracle
-artifacts and frozen fixtures were not modified; `/tmp/oxpinyin` still has
-only the local uncommitted diffs above.
+The other two commits in the PR stack are foundation already in main:
+PR **#80** (`fix/shared-fewest-keys-walk`) and PR **#81**
+(`feat/w8-fork-bootstrap-surface`, including the exported
+`pinyin_get_parsed_input_length`).
 
 ### Minimal changes list (fork branch)
 
@@ -247,37 +319,42 @@ only the local uncommitted diffs above.
    (`LIBPINYIN_SAVE_TIMEOUT_SECONDS`, default 300) so the headless harness
    can prove the save/train cycle without a five-minute wait.
 4. `tools/oxpinyin-parity/`: capture/comparison/smoke/parity scripts.
-5. `oxpinyin-patches/`: candidate upstream changes for the maintainer to
-   review.
+5. `oxpinyin-patches/`: deleted after the upstream PR stack landed
+   (see disposition above).
 6. `docs/oxpinyin-switch.md`: this record.
 
-### Findings / Stage-2 opportunities (note only)
+### Findings / current known gaps after revalidation
 
-- oxpinyin-core expands incomplete keys by string prefix rather than
-  phonetic initial. Fixing it in core is correct long-term but moved the
-  frozen pins; this experiment therefore applies the narrow capi shim
-  (`05-...patch`) and records the core fix as a maintainer decision.
-- Imported user/network dictionary phrases do not yet surface in oxpinyin
-  candidate lists. With the stock dev-install `network.txt`, the oracle
-  side shows six extra network candidates for `n`. The parity run uses an
-  emptied `network.txt` in the `/tmp/ibus-libpinyin-dev` install so both
-  sides start from the same network dictionary state; this is a Stage-2
-  oxpinyin gap, not a fork-side change.
-- `pinyin_load_addon_phrase_library` remains a provisional no-op; addon
-  dictionaries silently do not load.
-- Correction/fuzzy/dynamic-adjust option bits are not decoded by
-  oxpinyin-engine yet; the parity profile turns them off on the C++ side
-  so both backends implement the same supported semantics.
-- Double pinyin and chewing auxiliary text are still provisional preedit
-  text rather than C++-formatted key text.
+The former patch-05 incomplete-key finding is closed: PR **#85** fixes
+phonetic-initial expansion in oxpinyin core, so the C ABI boundary shim is
+no longer needed.
+
+Still open on oxpinyin main as of the revalidation:
+
+- Imported network/user dictionary phrases do not yet surface in oxpinyin
+  candidate lists. The parity gate therefore still uses an emptied
+  `/tmp/ibus-libpinyin-dev/share/ibus-libpinyin/network.txt` so both
+  backends start from the same dictionary state.
+- Correction, fuzzy, and dynamic-adjust option bits are still not decoded
+  by oxpinyin-engine; the parity profile keeps them off.
 - Prediction APIs (`pinyin_guess_predicted_candidates_with_punctuations`,
-  `pinyin_choose_predicted_candidate`) return false/no-op; the suggestion
-  editor path is not exercised by the smoke sequence.
+  `pinyin_choose_predicted_candidate`) remain no-op/false; the suggestion
+  editor path is not exercised by the parity sequence.
+- Double-pinyin and chewing auxiliary text remain provisional (preedit
+  text rather than C++-formatted key text).
+- `pinyin_load_addon_phrase_library` remains a provisional no-op, so addon
+  dictionaries still silently do not load.
 
 ## Verification
 
-- `git -C /tmp/oxpinyin status` shows only the six local patch diffs; no
-  commit was created and nothing was pushed to the oxpinyin remote.
-- No `gh pr create` or any PR command was run.
+- oxpinyin checkout is clean `main` @
+  `3ec6172b73e7158c0f9555e48cd71d7dcf00b576`: `git -C /tmp/oxpinyin status
+  --porcelain` is empty, so none of the six experiment patches remain
+  applied.
+- `oxpinyin-patches/` was deleted from the fork branch in commit
+  `fbd1b97`; the `.patch` files remain recoverable from git history.
+- No `gh pr create` or any other PR command was run, and nothing was
+  pushed to the oxpinyin remote.
 - Fork branch `feat/oxpinyin-backend` is pushed to
-  `origin` (`shenghaoc/ibus-libpinyin`).
+  `origin` (`shenghaoc/ibus-libpinyin`); the pushed tip SHA is recorded in
+  the revalidation report that accompanies this branch.
