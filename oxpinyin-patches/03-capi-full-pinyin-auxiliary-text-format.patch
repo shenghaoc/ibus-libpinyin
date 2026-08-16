@@ -1,0 +1,134 @@
+diff --git a/crates/oxpinyin-capi/src/text.rs b/crates/oxpinyin-capi/src/text.rs
+index 8980aff..8b68330 100644
+--- a/crates/oxpinyin-capi/src/text.rs
++++ b/crates/oxpinyin-capi/src/text.rs
+@@ -3,10 +3,104 @@
+ //! Provisional: all three input modes return the session's preedit text
+ //! until the engine has dedicated formatting per scheme.
+ 
++use oxpinyin_core::graph::{Edge, EdgeKind, SegmentGraph};
++use oxpinyin_core::SyllableKey;
++
+ use crate::ffi::{ffi_catch, owned_cstr};
+ use crate::state::instance_ref;
+ use crate::types::{GChar, PinyinInstance};
+ 
++/// The parse-path keys used for full-pinyin auxiliary text.
++///
++/// Mirrors `selected_path` in `oxpinyin-engine`: longest reachable prefix,
++/// fewest keys, first-found left-to-right shortest-key-first tie.  The C++
++/// matrix puts this parse's keys in column position 0, which is what
++/// `pinyin_get_full_pinyin_auxiliary_text` reads back.
++fn full_aux_keys(graph: &SegmentGraph) -> Vec<(SyllableKey, usize, usize)> {
++    let bound = graph.consumed();
++    let mut steps: Vec<Option<(usize, Edge, usize)>> = vec![None; bound + 1];
++
++    for node in 0..bound {
++        let count = match steps[node] {
++            Some((count, _, _)) => count,
++            None if node == 0 => 0,
++            None => continue,
++        };
++        let mut edges: Vec<Edge> = graph
++            .outgoing(node)
++            .iter()
++            .filter(|edge| edge.kind() != EdgeKind::Incomplete || true)
++            .copied()
++            .collect();
++        edges.sort_by_key(|edge| (edge.to() - edge.from(), edge.key().index()));
++        for edge in edges {
++            let to = edge.to();
++            if to > bound {
++                continue;
++            }
++            let candidate = count + 1;
++            if steps[to].as_ref().is_none_or(|(seen, _, _)| candidate < *seen) {
++                steps[to] = Some((candidate, edge, node));
++            }
++        }
++    }
++
++    let mut node = bound;
++    let mut reversed = Vec::new();
++    while node != 0 {
++        let Some((_, edge, prev)) = steps[node] else {
++            break;
++        };
++        reversed.push((edge.key(), edge.from(), edge.to()));
++        node = prev;
++    }
++    reversed.reverse();
++    reversed
++}
++
++/// Formats the parsed prefix of `raw` the way the pinned C++ backend does:
++/// space-separated syllable spellings with `|` at the byte cursor.
++fn full_aux_text(raw: &str, parsed_len: usize, cursor: usize) -> String {
++    let parsed = &raw[..parsed_len.min(raw.len())];
++    if parsed.is_empty() {
++        return String::new();
++    }
++    let cursor = cursor.min(parsed.len());
++    let Ok(graph) = SegmentGraph::build(parsed.as_bytes()) else {
++        return String::new();
++    };
++    let keys = full_aux_keys(&graph);
++    let mut out = String::new();
++    let mut inserted = false;
++
++    for (key, begin, end) in &keys {
++        if cursor <= *begin {
++            if !inserted && cursor == *begin {
++                out.push('|');
++                inserted = true;
++            }
++            out.push_str(key.text());
++            out.push(' ');
++        } else if cursor < *end {
++            let text = key.text();
++            let split = cursor - begin;
++            out.push_str(&text[..split]);
++            out.push('|');
++            out.push_str(&text[split..]);
++            out.push(' ');
++            inserted = true;
++        } else {
++            out.push_str(key.text());
++            out.push(' ');
++        }
++    }
++
++    if !inserted {
++        out.push('|');
++    }
++    out
++}
++
+ /// Get auxiliary text for full pinyin display.
+ ///
+ /// # C signature
+@@ -21,7 +115,7 @@ use crate::types::{GChar, PinyinInstance};
+ #[unsafe(no_mangle)]
+ pub extern "C" fn pinyin_get_full_pinyin_auxiliary_text(
+     instance: *mut PinyinInstance,
+-    _cursor: usize,
++    cursor: usize,
+     aux_text: *mut *mut GChar,
+ ) -> bool {
+     if instance.is_null() {
+@@ -31,12 +125,13 @@ pub extern "C" fn pinyin_get_full_pinyin_auxiliary_text(
+         // SAFETY: `instance` is non-null and was produced by
+         // `pinyin_alloc_instance`.
+         let inst = unsafe { instance_ref(instance) };
+-        let preedit = inst.session.preedit();
++        let raw = inst.session.raw_input();
++        let text = full_aux_text(raw, inst.parsed_len, cursor);
+         if !aux_text.is_null() {
+             // SAFETY: Null-checked above. `owned_cstr` returns null on an
+             // interior NUL or allocation failure; otherwise ownership
+             // transfers to the caller, which frees it with `g_free`.
+-            let owned = owned_cstr(preedit.text());
++            let owned = owned_cstr(&text);
+             // SAFETY: Null-checked above.
+             unsafe {
+                 *aux_text = owned;

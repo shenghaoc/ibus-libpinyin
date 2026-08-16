@@ -1,0 +1,13 @@
+diff --git a/crates/oxpinyin-engine/src/session.rs b/crates/oxpinyin-engine/src/session.rs
+index 197f366..6a6fbc2 100644
+--- a/crates/oxpinyin-engine/src/session.rs
++++ b/crates/oxpinyin-engine/src/session.rs
+@@ -53,7 +53,7 @@ const SEGMENTATION_K: usize = 8;
+ /// Comfortably above the capture protocol's depth of ten, so the differential
+ /// can measure a prefix-10 overlap without the list being the thing that
+ /// truncates it.
+-const MAX_CANDIDATES: usize = 64;
++const MAX_CANDIDATES: usize = 4096;
+ 
+ /// Longest phrase, in keys, the sentence builder will look back for.
+ const MAX_PHRASE_KEYS: usize = 8;

@@ -1,0 +1,25 @@
+diff --git a/crates/oxpinyin-capi/src/state.rs b/crates/oxpinyin-capi/src/state.rs
+index b4b0260..3373e5a 100644
+--- a/crates/oxpinyin-capi/src/state.rs
++++ b/crates/oxpinyin-capi/src/state.rs
+@@ -153,7 +153,19 @@ impl CapiContext {
+         // §3); a real install ships one. Absent (no table.conf in the dir),
+         // the pinned 0.312699 default stands.
+         lm.set_lambda_from_table_conf(&sys.join("table.conf"));
+-        lm.set_unigrams_from_dict(&dict);
++
++        // W8 fork-bootstrap wiring: a system dir that ships the fetched
++        // pinned model (`tools/model/fetch-model.sh` cache) also carries
++        // `interpolation2.text`; install its real phrase-index counts so the
++        // candidate construction runs the pinned three-key order. Without
++        // the fetched model keep the export-ABI flat-100 fallback, which is
++        // what the mini fixture and unit tests use.
++        let interpolation2 = sys.join("interpolation2.text");
++        if interpolation2.is_file() {
++            lm.set_unigrams_from_interpolation2(&interpolation2).ok()?;
++        } else {
++            lm.set_unigrams_from_dict(&dict);
++        }
+ 
+         let user = if user_dir.is_empty() {
+             None
