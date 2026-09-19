@@ -169,8 +169,7 @@ LibPinyinCandidates::selectCandidate (EnhancedCandidate & enhanced)
 
     /* The cursor is at the end of the text input. */
     if (m_editor->m_cursor == m_editor->m_text.length ()) {
-        /* "begin" is a raw text offset; wash it into a pinyin lookup
-           offset, to include the "'" separator before the next pinyin. */
+        /* Translate text offset to pinyin offset. */
         size_t pinyin_cursor = 0;
         pinyin_get_pinyin_offset (instance, begin, &pinyin_cursor);
         m_editor->m_lookup_cursor = pinyin_cursor;
